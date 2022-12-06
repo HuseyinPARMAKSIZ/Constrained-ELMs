@@ -1,0 +1,165 @@
+All codes are in the testing phase yet!!!
+
+
+%% Original  Authors:   Wentao Zhu, Jun Miao, Laiyun Qing - University of Chinese Academy of Sciences, Beijing %%
+%% Improved and edited by me last quarter of 2022 (CS-ELM for Radio Frequency Fingerprint Classification Problems.)
+
+clear all; close all; clc; warning off
+%------------------Loading datasets ----------------% 
+%-----Load Ready-RF dataset -----------------------------%
+load('Ready6Ftrvete.mat'); % load('Ready9Ftrvete.mat');
+Yd_train=train_data(:,1)'; X=train_data(:,2:size(train_data,2))'; %X=zscore(X);
+Yd_test=test_data(:,1)';  Xt=test_data(:,2:size(test_data,2))'; %Xt=zscore(Xt);
+%-----Definitions--------%
+Elm_Type = 1; REGRESSION=0; CLASSIFIER=1; ite=1; C=max(eig(X'*X)); % regularization factor                              
+N=size(X,2); %training data size
+Nt=size(Xt,2); %testing data size
+Nin=size(X,1);% input neurons size
+Nhn=100; % hidden neurons size
+ActivationFunction='logsig';
+DenSay=5; % iteration size
+if Elm_Type~=REGRESSION
+    %%%%%%%%%%%% Preprocessing the data of classification
+    sorted_target=sort(Yd_train,2);
+    label=zeros(1,1);   %   Find and save in 'label' class label from training and testing data sets
+    label(1,1)=sorted_target(1,1);
+    j=1;
+    for i = 2:N
+        if sorted_target(1,i) ~= label(1,j)
+            j=j+1;
+            label(1,j) = sorted_target(1,i);
+        end
+    end
+    number_class=j;
+    Non=number_class;
+    %%%%%%%%%% Processing the targets of training
+    temp_T=zeros(Non, N);
+    for i = 1:N
+        for j = 1:number_class
+            if label(1,j) == Yd_train(1,i)
+                break; 
+            end
+        end
+        temp_T(j,i)=1;
+    end
+    Yd_train=temp_T*2-1;
+    %%%%%%%%%% Processing the targets of testing
+    temp_TV_T=zeros(Non, Nt);
+    for i = 1:Nt
+        for j = 1:number_class
+            if label(1,j) == Yd_test(1,i)
+                break; 
+            end
+        end
+        temp_TV_T(j,i)=1;
+    end
+    Yd_test=temp_TV_T*2-1;
+end                                                 %   end if of Elm_Type
+
+while ite<=DenSay
+%%%%%%%%%%% Calculate weights & biases
+start_time_train = tic;
+%%%% Random generated sample divisions
+InputWeight = zeros(Nhn,Nin);
+Bhn=rand(Nhn,1);
+Flag = number_class;
+i = 1;
+while i < Nhn + 1 
+    %%% Select two different classes separatly
+    Class_1_Label = 1; Class_2_Label = 2;
+    while Class_1_Label ~= Class_2_Label
+        Class_1 = randi(N,1); Class_2 = randi(N,1);
+        Class_1_Label = find(Yd_train(:,Class_1)'+1,2); Class_2_Label = find(Yd_train(:,Class_2)'+1,2);
+    end
+    %%% Delete the small different weights
+    InputWeight(i,:) = X(:,Class_1) + X(:,Class_2);
+    NormWeight = dot(InputWeight(i,:),InputWeight(i,:));
+    if  NormWeight > 1/(Flag*number_class)
+        Flag = Flag - 1;
+        continue;
+    end
+    InputWeight(i,:) = InputWeight(i,:) ./ (NormWeight/2);
+    i = i + 1;
+end
+%%%%%%%%%%% Random generate input weights InputWeight (w_i) and biases Bhn (b_i) of hidden neurons
+tempH=InputWeight*X;
+ind=ones(1,N);
+BiasMatrix=Bhn(:,ind);       %   Extend the bias matrix Bhn to match the demention of H
+tempH=tempH+BiasMatrix;
+
+%%%%%%%%%%% Calculate hidden neuron output matrix H
+switch lower(ActivationFunction)
+    case {'logsig','sigmoid'}
+        %%%%%%%% Sigmoid 
+        H = 1 ./ (1 + exp(-tempH));
+    case {'tansig'}
+        %%%%%%%% Radial basis function
+        H = tansig(tempH);
+        %%%%%%%% More activation functions can be added here                
+end
+clear tempH;                                        %   Release the temparary array for calculation of hidden neuron output matrix H
+
+%%%%%%%%%%% Calculate output weights OutputWeight (beta_i)
+if  C == 10 ^ 100
+    OutputWeight=pinv(H') * Yd_train';                        
+else
+    OutputWeight=(eye(size(H,1))/C+H * H') \ H * Yd_train';      % faster method 2 //refer to 2012 IEEE TSMC-B paper
+end
+
+TrainigTime=toc(start_time_train);
+timeTr(ite)=TrainigTime;
+%%%%%%%%%%% Calculate the training accuracy
+Y=(H' * OutputWeight)';                             %   Y: the actual output of the training data
+clear H;
+
+%%%%%%%%%%% Calculate the output of testing input
+start_time_test=tic;
+tempH_test=InputWeight*Xt;
+ind=ones(1,Nt);
+BiasMatrix=Bhn(:,ind);              %   Extend the bias matrix Bhn to match the demention of H
+tempH_test=tempH_test + BiasMatrix;
+switch lower(ActivationFunction)
+    case {'logsig','sigmoid'}
+        %%%%%%%% Sigmoid 
+        H_test = 1 ./ (1 + exp(-tempH_test));
+    case {'tansig'}
+        %%%%%%%% Sine
+        H_test = tansig(tempH_test);        
+end
+clear tempH_test;
+TY=(H_test' * OutputWeight)';                       %   TY: the actual output of the testing data
+TestingTime=toc(start_time_test);%cputime;
+timeTe(ite)=TestingTime;
+clear H_test;
+
+
+if Elm_Type == CLASSIFIER
+%---  Calculate training & testing classification accuracy
+WrongGuessClass=0;    WrongGuessClassT=0;
+Yd_tr=Yd_train; Yd_te=Yd_test;
+%--- Calculate training classification accuracy
+    for i = 1 : size(Yd_tr, 2)
+        [x, i_Labeld]=max(Yd_tr(:,i));
+        [x, i_labela]=max(Y(:,i));
+            if i_labela~=i_Labeld
+                WrongGuessClass=WrongGuessClass+1;
+            end
+    end
+    TrainingAccuracy(ite)=1-WrongGuessClass/size(Yd_tr,2);
+%--- Calculate testing classification accuracy
+    for i = 1 : size(Yd_te, 2)
+        [x, i_Labeld]=max(Yd_te(:,i));
+        [x, i_labela]=max(TY(:,i)); % TY: the actual output of the testing data
+            if i_labela~=i_Labeld
+                WrongGuessClassT=WrongGuessClassT+1;
+            end
+    end
+    TestingAccuracy(ite)=1-WrongGuessClassT/size(Yd_te,2);
+end % Classifier_if
+ite=ite+1; %iteration increment
+end % while ite
+
+TrAcc=mean(TrainingAccuracy)
+TrTime=mean(timeTr)
+TeAcc=mean(TestingAccuracy)
+TeTime=mean(timeTe)
